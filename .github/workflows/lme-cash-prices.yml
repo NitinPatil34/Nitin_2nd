@@ -1,6 +1,9 @@
 name: Record LME cash prices
 
 on:
+  push:
+    branches:
+      - cursor/lme-sheets-automation-f02e
   schedule:
     - cron: '30 2 * * *'
   workflow_dispatch:
