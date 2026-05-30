@@ -1,1 +1,205 @@
-# Nitin_2nd
+# LME cash price automation
+
+This repository records daily LME cash prices for:
+
+- LME Nickel
+- LME Copper
+- LME Aluminium
+
+The automation uses Playwright to log in to [lme.com](https://www.lme.com/), read the cash-price row on each non-ferrous metal page, and append the results to a Google Sheet through a Google Apps Script web app.
+
+## Schedule
+
+The GitHub Actions workflow runs every day at **02:30 UTC**:
+
+```yaml
+cron: '30 2 * * *'
+```
+
+You can also run it manually from the **Actions** tab with `workflow_dispatch`. The workflow is configured for a self-hosted GitHub Actions runner labeled `lme`, because LME/Cloudflare blocks GitHub-hosted runners before the login form loads.
+
+## GitHub Secrets
+
+Yes, the LME credentials and Google Sheet web app values should be stored in GitHub repository secrets, not in source code.
+
+The workflow supports either one combined secret named `DETAILS` or separate secrets. If you already added everything under `DETAILS`, make sure the value uses one of these formats.
+
+JSON format:
+
+```json
+{
+  "LME_USERNAME": "your-lme-login",
+  "LME_PASSWORD": "your-lme-password",
+  "GOOGLE_SHEETS_WEBAPP_URL": "https://script.google.com/macros/s/.../exec",
+  "GOOGLE_SHEETS_WEBAPP_TOKEN": "same-token-as-apps-script",
+  "LME_LOGIN_URL": "https://www.lme.com/account/login"
+}
+```
+
+Or `KEY=VALUE` lines:
+
+```text
+LME_USERNAME=your-lme-login
+LME_PASSWORD=your-lme-password
+GOOGLE_SHEETS_WEBAPP_URL=https://script.google.com/macros/s/.../exec
+GOOGLE_SHEETS_WEBAPP_TOKEN=same-token-as-apps-script
+LME_LOGIN_URL=https://www.lme.com/account/login
+```
+
+If you named the token `WEBHOOK_TOKEN` inside `DETAILS`, that also works.
+
+`LME_LOGIN_URL` is optional. The default is https://www.lme.com/account/login; override it only if your LME account uses a different login page.
+
+Alternatively, create separate repository secrets under **Settings -> Secrets and variables -> Actions -> New repository secret**:
+
+| Secret | Required | Description |
+| --- | --- | --- |
+| `LME_USERNAME` | Yes | LME login username or email. |
+| `LME_PASSWORD` | Yes | LME login password. |
+| `LME_LOGIN_URL` | Optional | Exact LME login URL; defaults to https://www.lme.com/account/login. |
+| `GOOGLE_SHEETS_WEBAPP_URL` | Yes | Deployed Google Apps Script web app URL. A secret named `GOOGLE_SHEETS` is also accepted for this URL. |
+| `GOOGLE_SHEETS_WEBAPP_TOKEN` | Yes | Shared token used to protect the web app endpoint. |
+
+## Google Sheet web app setup
+
+1. Create or open the Google Sheet that should receive the prices.
+2. Go to **Extensions -> Apps Script**.
+3. Paste the contents of [`scripts/google-apps-script/Code.gs`](scripts/google-apps-script/Code.gs).
+4. In Apps Script, go to **Project Settings -> Script properties** and add:
+   - Property: `WEBHOOK_TOKEN`
+   - Value: a long random value
+5. Deploy with **Deploy -> New deployment -> Web app**.
+6. Set:
+   - Execute as: **Me**
+   - Who has access: **Anyone with the link**
+7. Copy the deployment URL into either `GOOGLE_SHEETS_WEBAPP_URL` or the matching field inside the combined `DETAILS` secret.
+8. Put the same random token into either `GOOGLE_SHEETS_WEBAPP_TOKEN` or the matching field inside the combined `DETAILS` secret.
+
+The Apps Script creates or updates a sheet tab named **Non Ferrous** and appends one row per metal on every run.
+
+## Self-hosted runner setup for LME
+
+LME blocks GitHub-hosted runners with a Cloudflare browser challenge. Use a self-hosted runner on a machine or VPS whose browser/IP can open `https://www.lme.com/account/login` normally.
+
+1. In GitHub, go to **Settings -> Actions -> Runners -> New self-hosted runner**.
+2. Install the runner on the chosen machine and add the custom label:
+   ```text
+   lme
+   ```
+3. Install Node.js 22+ on that machine.
+4. From the repository working copy on the runner machine, run the helper as the same OS user that runs the GitHub runner service:
+   ```bash
+   npm run setup:self-hosted:lme
+   ```
+   This installs dependencies, installs Playwright Chromium, and starts the LME login bootstrap in installed Google Chrome using a persistent local profile at `~/.lme/chrome-bootstrap-profile`.
+5. A visible Google Chrome window opens. If you are stuck on Cloudflare, close the window and rerun the helper; the same persistent local profile is reused. Complete the Cloudflare check and LME login manually, then return to the terminal and press Enter.
+6. The script saves the approved browser session to:
+   ```text
+   ~/.lme/lme-storage-state.json
+   ```
+7. Run an LME-only test from the same machine:
+   ```bash
+   npm run test:lme:fetch-only
+   ```
+8. In GitHub Actions, run **Record LME cash prices** manually and set `fetch_only=true` for the first runner-based test. That prints the extracted LME rows without updating Google Sheets.
+
+The scheduled workflow also uses `~/.lme/lme-storage-state.json`. If LME expires the session, repeat `npm run setup:self-hosted:lme`.
+
+
+### If the LME page still will not show email/password on Mac
+
+1. Quit all Chrome windows opened by the bootstrap.
+2. Run the setup again so it reuses the persistent profile:
+   ```bash
+   npm run setup:self-hosted:lme
+   ```
+3. If Chrome says it cannot find the `chrome` channel, install Google Chrome normally from <https://www.google.com/chrome/> and rerun the command.
+4. If LME still keeps showing only the Cloudflare page, open `https://www.lme.com/account/login` in your normal Chrome outside Terminal. If normal Chrome also cannot reach the email/password page, the block is IP/account/browser-policy related and you need to try another network/VPN/VPS IP that LME accepts.
+
+
+### Final Mac fallback: attach to a manually launched Chrome
+
+If `npm run setup:self-hosted:lme` still does not show the email/password fields, use this flow so Playwright attaches to a Chrome window that you launch manually:
+
+1. From the repository folder, run:
+   ```bash
+   npm run start:mac-debug-chrome
+   ```
+2. In the Chrome window that opens, try to reach:
+   ```text
+   https://www.lme.com/account/login
+   ```
+3. If you can reach email/password, log in and leave Chrome open.
+4. In a second Terminal tab from the same repository folder, run:
+   ```bash
+   npm run bootstrap:existing-chrome
+   ```
+5. Press Enter in that second Terminal after the LME login is complete.
+6. Test extraction:
+   ```bash
+   npm run test:lme:fetch-only
+   ```
+
+If this manually launched Chrome window also cannot get past Cloudflare to the email/password page, the block is not in this code. It means LME/Cloudflare is blocking your current Mac/network/IP/account path. In that case, try another network, a VPN endpoint accepted by LME, or a VPS/desktop machine where normal Chrome can open the LME login page. Once normal Chrome can reach the login page, rerun the steps above.
+
+## Local validation
+
+Install dependencies:
+
+```bash
+npm ci
+```
+
+Check script syntax:
+
+```bash
+npm run check
+```
+
+Run the full fetcher locally:
+
+```bash
+LME_USERNAME='your-login' \
+LME_PASSWORD='your-password' \
+GOOGLE_SHEETS_WEBAPP_URL='https://script.google.com/macros/s/...' \
+GOOGLE_SHEETS_WEBAPP_TOKEN='same-token-as-apps-script' \
+npm run fetch:lme
+```
+
+Run only the LME login/data extraction step without posting to Google Sheets:
+
+```bash
+LME_FETCH_ONLY=true \
+LME_USERNAME='your-login' \
+LME_PASSWORD='your-password' \
+npm run fetch:lme
+```
+
+After a self-hosted bootstrap, test with the saved session only:
+
+```bash
+npm run test:lme:fetch-only
+```
+
+If the LME login page is different for your account, add:
+
+```bash
+LME_LOGIN_URL='https://www.lme.com/account/login'
+```
+
+## Recorded columns
+
+The Google Sheet tab receives:
+
+- Fetched At UTC
+- Source Date
+- Metal
+- Price Type
+- Currency
+- Cash Price
+- Cash Bid
+- Cash Offer
+- Raw Cash Row
+- Source URL
+
+When both bid and offer are present, `Cash Price` is recorded as the midpoint. The original extracted row is kept in `Raw Cash Row` for auditability.

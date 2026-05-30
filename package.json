@@ -1,0 +1,34 @@
+{
+  "name": "workspace",
+  "version": "1.0.0",
+  "description": "Automated LME cash price capture to Google Sheets",
+  "main": "index.js",
+  "scripts": {
+    "test": "npm run check",
+    "fetch:lme": "node src/lme-prices.js",
+    "check": "node --check src/lme-prices.js",
+    "bootstrap:lme": "LME_BOOTSTRAP_ONLY=true LME_HEADLESS=false node src/lme-prices.js",
+    "setup:self-hosted:lme": "./scripts/bootstrap-self-hosted-lme.sh",
+    "test:lme:fetch-only": "./scripts/test-lme-fetch-only.sh",
+    "start:mac-debug-chrome": "./scripts/start-mac-debug-chrome.sh",
+    "bootstrap:existing-chrome": "./scripts/bootstrap-existing-chrome.sh"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NitinPatil34/Nitin_2nd.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/NitinPatil34/Nitin_2nd/issues"
+  },
+  "homepage": "https://github.com/NitinPatil34/Nitin_2nd#readme",
+  "dependencies": {
+    "playwright": "^1.60.0"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  }
+}

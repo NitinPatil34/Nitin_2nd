@@ -1,0 +1,649 @@
+import { chromium } from 'playwright';
+import { existsSync } from 'node:fs';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { createInterface } from 'node:readline/promises';
+import { stdin as input, stdout as output } from 'node:process';
+
+const METALS = [
+  {
+    metal: 'LME Nickel',
+    url: 'https://www.lme.com/en/Metals/Non-ferrous/LME-Nickel',
+  },
+  {
+    metal: 'LME Copper',
+    url: 'https://www.lme.com/en/Metals/Non-ferrous/LME-Copper',
+  },
+  {
+    metal: 'LME Aluminium',
+    url: 'https://www.lme.com/en/Metals/Non-ferrous/LME-Aluminium',
+  },
+];
+
+const LME_REQUIRED_SETTINGS = ['LME_USERNAME', 'LME_PASSWORD'];
+const GOOGLE_SHEETS_REQUIRED_SETTINGS = ['GOOGLE_SHEETS_WEBAPP_URL', 'GOOGLE_SHEETS_WEBAPP_TOKEN'];
+
+const SETTING_ALIASES = {
+  LME_USERNAME: ['LME_USERNAME', 'LME_USER', 'LME_EMAIL', 'LME_LOGIN', 'USERNAME', 'EMAIL'],
+  LME_PASSWORD: ['LME_PASSWORD', 'LME_PASS', 'PASSWORD'],
+  LME_LOGIN_URL: ['LME_LOGIN_URL', 'LOGIN_URL'],
+  GOOGLE_SHEETS_WEBAPP_URL: [
+    'GOOGLE_SHEETS_WEBAPP_URL',
+    'GOOGLE_SHEET_WEBAPP_URL',
+    'GOOGLE_WEBAPP_URL',
+    'GOOGLE_SHEETS',
+    'GOOGLE_SHEET',
+    'WEBAPP_URL',
+    'SHEETS_WEBAPP_URL',
+  ],
+  GOOGLE_SHEETS_WEBAPP_TOKEN: [
+    'GOOGLE_SHEETS_WEBAPP_TOKEN',
+    'GOOGLE_SHEET_WEBAPP_TOKEN',
+    'GOOGLE_WEBAPP_TOKEN',
+    'GOOGLE_SHEETS_TOKEN',
+    'GOOGLE_SHEET_TOKEN',
+    'SHEETS_TOKEN',
+    'SHEET_TOKEN',
+    'WEBAPP_TOKEN',
+    'WEBHOOK_TOKEN',
+    'TOKEN',
+  ],
+};
+
+function normalizeKey(key) {
+  return key
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+function cleanValue(value) {
+  return String(value ?? '')
+    .trim()
+    .replace(/^[\'"]|[\'"]$/g, '');
+}
+
+function parseDetailsSecret(rawDetails) {
+  const details = {};
+  const addEntry = (key, value) => {
+    const cleanedValue = cleanValue(value);
+    if (!key || !cleanedValue) {
+      return;
+    }
+
+    details[key] = cleanedValue;
+    details[normalizeKey(key)] = cleanedValue;
+  };
+
+  if (!rawDetails?.trim()) {
+    return details;
+  }
+
+  try {
+    const parsed = JSON.parse(rawDetails);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      for (const [key, value] of Object.entries(parsed)) {
+        addEntry(key, value);
+      }
+
+      return details;
+    }
+  } catch {
+    // If DETAILS is not JSON, parse it as KEY=VALUE or KEY: VALUE lines.
+  }
+
+  for (const line of rawDetails.split(/\r?\n/)) {
+    const match = line.match(/^\s*([^:=#]+?)\s*[:=]\s*(.+?)\s*$/) ||
+      line.match(/^\s*([^#]+?)\s+-\s+(.+?)\s*$/);
+    if (match) {
+      addEntry(match[1], match[2]);
+    }
+  }
+
+  return details;
+}
+
+function configValue(settingName, details) {
+  const aliases = SETTING_ALIASES[settingName] || [settingName];
+  for (const alias of [settingName, ...aliases]) {
+    const directValue = cleanValue(process.env[alias]);
+    if (directValue) {
+      return directValue;
+    }
+  }
+
+  for (const alias of aliases) {
+    const value = details[alias] || details[normalizeKey(alias)];
+    if (value) {
+      return value;
+    }
+  }
+
+  return '';
+}
+
+function isEnabled(value) {
+  return ['1', 'true', 'yes', 'on'].includes(String(value || '').trim().toLowerCase());
+}
+
+function expandHomePath(filePath) {
+  if (!filePath?.startsWith('~/')) {
+    return filePath;
+  }
+
+  return path.join(process.env.HOME || process.cwd(), filePath.slice(2));
+}
+
+async function fileExists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getConfig() {
+  const details = parseDetailsSecret(process.env.DETAILS);
+  const fetchOnly = isEnabled(process.env.LME_FETCH_ONLY);
+  const bootstrapOnly = isEnabled(process.env.LME_BOOTSTRAP_ONLY);
+  const storageStatePath = expandHomePath(process.env.LME_STORAGE_STATE || '~/.lme/lme-storage-state.json');
+  const sessionOnly =
+    isEnabled(process.env.LME_SESSION_ONLY) ||
+    (fetchOnly &&
+      existsSync(storageStatePath) &&
+      !configValue('LME_USERNAME', details) &&
+      !configValue('LME_PASSWORD', details));
+  const requiredSettings = bootstrapOnly || sessionOnly
+    ? []
+    : fetchOnly
+      ? LME_REQUIRED_SETTINGS
+      : [...LME_REQUIRED_SETTINGS, ...GOOGLE_SHEETS_REQUIRED_SETTINGS];
+  const settings = {
+    lmeUsername: configValue('LME_USERNAME', details),
+    lmePassword: configValue('LME_PASSWORD', details),
+    lmeLoginUrl: configValue('LME_LOGIN_URL', details) || 'https://www.lme.com/account/login',
+    googleSheetsWebappUrl: configValue('GOOGLE_SHEETS_WEBAPP_URL', details),
+    googleSheetsWebappToken: configValue('GOOGLE_SHEETS_WEBAPP_TOKEN', details),
+    fetchOnly,
+    bootstrapOnly,
+    sessionOnly,
+    storageStatePath,
+    bootstrapProfileDir: expandHomePath(process.env.LME_BOOTSTRAP_PROFILE_DIR || '~/.lme/chrome-bootstrap-profile'),
+    browserChannel: process.env.LME_BROWSER_CHANNEL || (bootstrapOnly ? 'chrome' : ''),
+    cdpEndpoint: process.env.LME_CDP_ENDPOINT || '',
+    headless: process.env.LME_HEADLESS !== 'false',
+    debugArtifactsDir: process.env.DEBUG_ARTIFACT_DIR || 'debug-artifacts',
+  };
+
+  const missingSettings = requiredSettings.filter((name) => !configValue(name, details));
+  if (missingSettings.length > 0) {
+    throw new Error(
+      `Missing required configuration: ${missingSettings.join(
+        ', ',
+      )}. Provide these as individual GitHub Secrets or inside the DETAILS secret.`,
+    );
+  }
+
+  return settings;
+}
+
+async function saveStorageState(context, config) {
+  await fs.mkdir(path.dirname(config.storageStatePath), { recursive: true });
+  await context.storageState({ path: config.storageStatePath });
+  console.log(`Saved LME browser session to ${config.storageStatePath}`);
+}
+
+async function firstVisible(page, selectors, timeoutMs = 2_000) {
+  for (const selector of selectors) {
+    const locator = page.locator(selector).first();
+    try {
+      await locator.waitFor({ state: 'visible', timeout: timeoutMs });
+      return locator;
+    } catch {
+      // Try the next selector. LME markup can differ between account flows.
+    }
+  }
+
+  return null;
+}
+
+async function waitForCloudflareChallenge(page) {
+  for (let attempt = 0; attempt < 90; attempt += 1) {
+    const title = await page.title().catch(() => '');
+    const bodyText = await page.locator('body').innerText({ timeout: 1_000 }).catch(() => '');
+    const challengeVisible =
+      /just a moment/i.test(title) ||
+      /checking your browser|verify you are human|enable javascript and cookies/i.test(bodyText);
+
+    if (!challengeVisible) {
+      return;
+    }
+
+    await page.waitForTimeout(1_000);
+  }
+
+  throw new Error(
+    'LME is still showing a Cloudflare browser challenge after waiting. The runner may need an allowlist, exact LME login URL, or a non-GitHub-hosted execution environment.',
+  );
+}
+
+async function acceptCookies(page) {
+  const cookieButton = await firstVisible(
+    page,
+    [
+      'button:has-text("Accept all")',
+      'button:has-text("Accept All")',
+      'button:has-text("Accept cookies")',
+      'button:has-text("Allow all")',
+      'button:has-text("I accept")',
+    ],
+    1_000,
+  );
+
+  if (cookieButton) {
+    await cookieButton.click();
+    await page.waitForTimeout(500);
+  }
+}
+
+async function openLogin(page, loginUrl) {
+  await page.goto(loginUrl, { waitUntil: 'domcontentloaded' });
+  await waitForCloudflareChallenge(page);
+  await acceptCookies(page);
+
+  const hasPassword = await firstVisible(page, ['input[type="password"]'], 1_000);
+  if (hasPassword) {
+    return;
+  }
+
+  const loginLink = await firstVisible(
+    page,
+    [
+      'a:has-text("Login")',
+      'a:has-text("Log in")',
+      'a:has-text("Sign in")',
+      'a:has-text("Account")',
+      'a[href*="login" i]',
+      'a[href*="account" i]',
+      'a[href*="signin" i]',
+      '[aria-label*="account" i]',
+      'button:has-text("Login")',
+      'button:has-text("Log in")',
+      'button:has-text("Sign in")',
+      'button:has-text("Account")',
+    ],
+    3_000,
+  );
+
+  if (!loginLink) {
+    throw new Error(
+      'Could not find the LME login entry point. Set LME_LOGIN_URL to the exact login page URL.',
+    );
+  }
+
+  await loginLink.click();
+  await page.waitForLoadState('domcontentloaded').catch(() => undefined);
+  await waitForCloudflareChallenge(page);
+  await acceptCookies(page);
+}
+
+async function loginToLme(page, config) {
+  await openLogin(page, config.lmeLoginUrl);
+
+  const usernameInput = await firstVisible(page, [
+    'input[type="email"]',
+    'input[name*="email" i]',
+    'input[id*="email" i]',
+    'input[name*="user" i]',
+    'input[id*="user" i]',
+    'input[name*="login" i]',
+    'input[id*="login" i]',
+  ]);
+  if (!usernameInput) {
+    throw new Error('Could not find the LME username/email field.');
+  }
+
+  await usernameInput.fill(config.lmeUsername);
+
+  const passwordInput = await firstVisible(page, ['input[type="password"]']);
+  if (!passwordInput) {
+    throw new Error('Could not find the LME password field.');
+  }
+
+  await passwordInput.fill(config.lmePassword);
+
+  const submitButton = await firstVisible(page, [
+    'button[type="submit"]',
+    'input[type="submit"]',
+    'button:has-text("Login")',
+    'button:has-text("Log in")',
+    'button:has-text("Sign in")',
+    'button:has-text("Submit")',
+  ]);
+  if (!submitButton) {
+    throw new Error('Could not find the LME login submit button.');
+  }
+
+  await submitButton.click();
+  await page.waitForLoadState('networkidle').catch(() => undefined);
+  await page.waitForTimeout(1_000);
+
+  const loginError = await firstVisible(
+    page,
+    [
+      'text=/invalid|incorrect|failed|locked|unauthori[sz]ed/i',
+      '[role="alert"]',
+      '.error',
+      '.validation-summary-errors',
+    ],
+    2_000,
+  );
+  if (loginError) {
+    const errorText = (await loginError.textContent())?.trim();
+    throw new Error(`LME login appears to have failed: ${errorText || 'unknown error'}`);
+  }
+}
+
+function toNumber(value) {
+  if (!value) {
+    return null;
+  }
+
+  const normalized = value.replace(/,/g, '').trim();
+  if (!/^-?\d+(?:\.\d+)?$/.test(normalized)) {
+    return null;
+  }
+
+  return Number(normalized);
+}
+
+function extractNumbers(text) {
+  return [...text.matchAll(/-?\d{1,3}(?:,\d{3})*(?:\.\d+)?|-?\d+(?:\.\d+)?/g)]
+    .map((match) => toNumber(match[0]))
+    .filter((value) => value !== null);
+}
+
+function pickCashValues(cells) {
+  const joined = cells.join(' ');
+  const numbers = extractNumbers(joined);
+
+  if (numbers.length === 0) {
+    return null;
+  }
+
+  const cashBid = numbers[0] ?? null;
+  const cashOffer = numbers[1] ?? null;
+  const cashPrice =
+    cashBid !== null && cashOffer !== null ? Number(((cashBid + cashOffer) / 2).toFixed(4)) : cashBid;
+
+  return {
+    cashPrice,
+    cashBid,
+    cashOffer,
+  };
+}
+
+async function extractCashPrice(page, metal) {
+  const extracted = await page.evaluate(() => {
+    const normalize = (value) => value.replace(/\s+/g, ' ').trim();
+    const bodyText = document.body?.innerText || '';
+    const sourceDateMatch = bodyText.match(/Data valid for\s+([0-9]{1,2}\s+[A-Za-z]+\s+[0-9]{4})/i);
+    const tableCandidates = [];
+
+    for (const table of document.querySelectorAll('table')) {
+      const tableText = normalize(table.innerText || '');
+      const rows = [...table.querySelectorAll('tr')].map((row) =>
+        [...row.querySelectorAll('th,td')].map((cell) => normalize(cell.textContent || '')),
+      );
+
+      for (const row of rows) {
+        const rowText = row.join(' ');
+        if (/\bcash\b/i.test(rowText) && /\d/.test(rowText)) {
+          tableCandidates.push({
+            cells: row,
+            tableText,
+            sourceDate: sourceDateMatch?.[1] || '',
+          });
+        }
+      }
+    }
+
+    if (tableCandidates.length > 0) {
+      return tableCandidates[0];
+    }
+
+    const cashLine = bodyText
+      .split('\n')
+      .map((line) => normalize(line))
+      .find((line) => /\bcash\b/i.test(line) && /\d/.test(line));
+
+    return cashLine
+      ? {
+          cells: [cashLine],
+          tableText: cashLine,
+          sourceDate: sourceDateMatch?.[1] || '',
+        }
+      : null;
+  });
+
+  if (!extracted) {
+    throw new Error(`Could not find a cash-price row for ${metal.metal}.`);
+  }
+
+  const cashValues = pickCashValues(extracted.cells);
+  if (!cashValues) {
+    throw new Error(`Found a cash row for ${metal.metal}, but no numeric price values were present.`);
+  }
+
+  return {
+    fetchedAtUtc: new Date().toISOString(),
+    sourceDate: extracted.sourceDate,
+    metal: metal.metal,
+    priceType: 'Cash',
+    currency: 'USD',
+    cashPrice: cashValues.cashPrice,
+    cashBid: cashValues.cashBid,
+    cashOffer: cashValues.cashOffer,
+    rawCashRow: extracted.cells.join(' | '),
+    sourceUrl: metal.url,
+  };
+}
+
+async function fetchMetalRows(page) {
+  const rows = [];
+
+  for (const metal of METALS) {
+    await page.goto(metal.url, { waitUntil: 'domcontentloaded' });
+    await waitForCloudflareChallenge(page);
+    await acceptCookies(page);
+    await page.waitForLoadState('networkidle').catch(() => undefined);
+
+    const row = await extractCashPrice(page, metal);
+    console.log(`${metal.metal}: ${row.cashPrice} ${row.currency}`);
+    rows.push(row);
+  }
+
+  return rows;
+}
+
+async function postRowsToSheet(config, rows) {
+  const response = await fetch(config.googleSheetsWebappUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      token: config.googleSheetsWebappToken,
+      rows,
+    }),
+  });
+
+  const responseText = await response.text();
+  if (!response.ok) {
+    throw new Error(`Google Sheets web app returned ${response.status}: ${responseText}`);
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(responseText);
+  } catch {
+    throw new Error(`Google Sheets web app returned non-JSON response: ${responseText}`);
+  }
+
+  if (parsed.status !== 'ok') {
+    throw new Error(`Google Sheets web app rejected rows: ${responseText}`);
+  }
+
+  console.log(`Posted ${rows.length} row(s) to Google Sheets.`);
+}
+
+async function saveDebugArtifacts(page, debugArtifactsDir, error) {
+  await fs.mkdir(debugArtifactsDir, { recursive: true });
+  const safeTimestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const screenshotPath = path.join(debugArtifactsDir, `lme-error-${safeTimestamp}.png`);
+  const htmlPath = path.join(debugArtifactsDir, `lme-error-${safeTimestamp}.html`);
+
+  await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => undefined);
+  await fs.writeFile(htmlPath, await page.content()).catch(() => undefined);
+  console.error(error);
+  console.error(`Saved debug artifacts to ${debugArtifactsDir}`);
+}
+
+function browserLaunchOptions(config) {
+  const options = {
+    headless: config.headless,
+    args: ['--disable-blink-features=AutomationControlled'],
+  };
+
+  if (config.browserChannel) {
+    options.channel = config.browserChannel;
+  }
+
+  return options;
+}
+
+function browserContextOptions(config) {
+  return {
+    userAgent:
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+    viewport: { width: 1365, height: 768 },
+    locale: 'en-US',
+    timezoneId: 'UTC',
+    extraHTTPHeaders: {
+      'Accept-Language': 'en-US,en;q=0.9',
+    },
+  };
+}
+
+async function createBrowserSession(config) {
+  if (config.cdpEndpoint) {
+    const browser = await chromium.connectOverCDP(config.cdpEndpoint);
+    const context = browser.contexts()[0] || (await browser.newContext(browserContextOptions(config)));
+    const page = context.pages()[0] || (await context.newPage());
+    console.log(`Connected to existing Chrome at ${config.cdpEndpoint}`);
+    return { browser, context, page };
+  }
+
+  if (config.bootstrapOnly) {
+    await fs.mkdir(config.bootstrapProfileDir, { recursive: true });
+    const context = await chromium.launchPersistentContext(
+      config.bootstrapProfileDir,
+      {
+        ...browserLaunchOptions(config),
+        ...browserContextOptions(config),
+      },
+    );
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    });
+    console.log(`Using persistent bootstrap browser profile at ${config.bootstrapProfileDir}`);
+    return { browser: context, context, page: context.pages()[0] || (await context.newPage()) };
+  }
+
+  const browser = await chromium.launch(browserLaunchOptions(config));
+  const contextOptions = browserContextOptions(config);
+
+  if (await fileExists(config.storageStatePath)) {
+    contextOptions.storageState = config.storageStatePath;
+    console.log(`Loaded LME browser session from ${config.storageStatePath}`);
+  }
+
+  const context = await browser.newContext(contextOptions);
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+  });
+
+  return { browser, context, page: await context.newPage() };
+}
+
+async function bootstrapLmeSession(page, context, config) {
+  await page.goto(config.lmeLoginUrl, { waitUntil: 'domcontentloaded' });
+  console.log('A browser window has been opened for LME session bootstrap.');
+  if (config.cdpEndpoint) {
+    console.log('This bootstrap is attached to the Chrome window you launched manually.');
+  } else {
+    console.log('This bootstrap prefers installed Google Chrome with a persistent local profile.');
+  }
+  console.log('Complete the Cloudflare check and LME login manually in that browser.');
+  console.log('After the LME account page is loaded, return here and press Enter.');
+
+  const readline = createInterface({ input, output });
+  await readline.question('Press Enter after the LME login is complete...');
+  readline.close();
+
+  await saveStorageState(context, config);
+}
+
+async function getLmeRows(page, context, config) {
+  if (await fileExists(config.storageStatePath)) {
+    try {
+      return await fetchMetalRows(page);
+    } catch (error) {
+      console.log(`Stored LME browser session did not produce prices: ${error.message}`);
+      if (config.sessionOnly) {
+        throw new Error('Stored LME session failed. Run npm run bootstrap:lme again on the self-hosted runner.');
+      }
+      console.log('Falling back to username/password login.');
+    }
+  } else if (config.sessionOnly) {
+    throw new Error(`LME session file not found at ${config.storageStatePath}. Run npm run bootstrap:lme first.`);
+  }
+
+  await loginToLme(page, config);
+  await saveStorageState(context, config);
+  return fetchMetalRows(page);
+}
+
+async function main() {
+  const config = getConfig();
+  const { browser, context, page } = await createBrowserSession(config);
+
+  try {
+    if (config.bootstrapOnly) {
+      await bootstrapLmeSession(page, context, config);
+      return;
+    }
+
+    const rows = await getLmeRows(page, context, config);
+    console.log(`LME_FETCH_RESULT ${JSON.stringify(rows)}`);
+
+    if (config.fetchOnly) {
+      console.log('LME fetch-only mode enabled; skipping Google Sheets post.');
+      return;
+    }
+
+    await postRowsToSheet(config, rows);
+  } catch (error) {
+    await saveDebugArtifacts(page, config.debugArtifactsDir, error);
+    throw error;
+  } finally {
+    await browser.close();
+  }
+}
+
+main().catch((error) => {
+  console.error(error.message);
+  process.exitCode = 1;
+});
