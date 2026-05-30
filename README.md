@@ -46,6 +46,8 @@ GOOGLE_SHEETS_WEBAPP_TOKEN=same-token-as-apps-script
 LME_LOGIN_URL=https://www.lme.com/
 ```
 
+If you named the token `WEBHOOK_TOKEN` inside `DETAILS`, that also works.
+
 `LME_LOGIN_URL` is optional. Use it only if your LME account has a specific login page URL.
 
 Alternatively, create separate repository secrets under **Settings -> Secrets and variables -> Actions -> New repository secret**:
