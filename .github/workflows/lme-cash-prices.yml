@@ -1,0 +1,46 @@
+name: Record LME cash prices
+
+on:
+  schedule:
+    - cron: '30 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  record-prices:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      LME_USERNAME: ${{ secrets.LME_USERNAME }}
+      LME_PASSWORD: ${{ secrets.LME_PASSWORD }}
+      LME_LOGIN_URL: ${{ secrets.LME_LOGIN_URL }}
+      GOOGLE_SHEETS_WEBAPP_URL: ${{ secrets.GOOGLE_SHEETS_WEBAPP_URL }}
+      GOOGLE_SHEETS_WEBAPP_TOKEN: ${{ secrets.GOOGLE_SHEETS_WEBAPP_TOKEN }}
+      DEBUG_ARTIFACT_DIR: debug-artifacts
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Record LME cash prices
+        run: npm run fetch:lme
+
+      - name: Upload debug artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lme-debug-artifacts
+          path: debug-artifacts
+          if-no-files-found: ignore
