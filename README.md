@@ -116,6 +116,32 @@ The scheduled workflow also uses `~/.lme/lme-storage-state.json`. If LME expires
 3. If Chrome says it cannot find the `chrome` channel, install Google Chrome normally from <https://www.google.com/chrome/> and rerun the command.
 4. If LME still keeps showing only the Cloudflare page, open `https://www.lme.com/account/login` in your normal Chrome outside Terminal. If normal Chrome also cannot reach the email/password page, the block is IP/account/browser-policy related and you need to try another network/VPN/VPS IP that LME accepts.
 
+
+### Final Mac fallback: attach to a manually launched Chrome
+
+If `npm run setup:self-hosted:lme` still does not show the email/password fields, use this flow so Playwright attaches to a Chrome window that you launch manually:
+
+1. From the repository folder, run:
+   ```bash
+   npm run start:mac-debug-chrome
+   ```
+2. In the Chrome window that opens, try to reach:
+   ```text
+   https://www.lme.com/account/login
+   ```
+3. If you can reach email/password, log in and leave Chrome open.
+4. In a second Terminal tab from the same repository folder, run:
+   ```bash
+   npm run bootstrap:existing-chrome
+   ```
+5. Press Enter in that second Terminal after the LME login is complete.
+6. Test extraction:
+   ```bash
+   npm run test:lme:fetch-only
+   ```
+
+If this manually launched Chrome window also cannot get past Cloudflare to the email/password page, the block is not in this code. It means LME/Cloudflare is blocking your current Mac/network/IP/account path. In that case, try another network, a VPN endpoint accepted by LME, or a VPS/desktop machine where normal Chrome can open the LME login page. Once normal Chrome can reach the login page, rerun the steps above.
+
 ## Local validation
 
 Install dependencies:

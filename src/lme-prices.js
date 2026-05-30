@@ -172,6 +172,7 @@ function getConfig() {
     storageStatePath,
     bootstrapProfileDir: expandHomePath(process.env.LME_BOOTSTRAP_PROFILE_DIR || '~/.lme/chrome-bootstrap-profile'),
     browserChannel: process.env.LME_BROWSER_CHANNEL || (bootstrapOnly ? 'chrome' : ''),
+    cdpEndpoint: process.env.LME_CDP_ENDPOINT || '',
     headless: process.env.LME_HEADLESS !== 'false',
     debugArtifactsDir: process.env.DEBUG_ARTIFACT_DIR || 'debug-artifacts',
   };
@@ -537,6 +538,14 @@ function browserContextOptions(config) {
 }
 
 async function createBrowserSession(config) {
+  if (config.cdpEndpoint) {
+    const browser = await chromium.connectOverCDP(config.cdpEndpoint);
+    const context = browser.contexts()[0] || (await browser.newContext(browserContextOptions(config)));
+    const page = context.pages()[0] || (await context.newPage());
+    console.log(`Connected to existing Chrome at ${config.cdpEndpoint}`);
+    return { browser, context, page };
+  }
+
   if (config.bootstrapOnly) {
     await fs.mkdir(config.bootstrapProfileDir, { recursive: true });
     const context = await chromium.launchPersistentContext(
@@ -572,7 +581,11 @@ async function createBrowserSession(config) {
 async function bootstrapLmeSession(page, context, config) {
   await page.goto(config.lmeLoginUrl, { waitUntil: 'domcontentloaded' });
   console.log('A browser window has been opened for LME session bootstrap.');
-  console.log('This bootstrap prefers installed Google Chrome with a persistent local profile.');
+  if (config.cdpEndpoint) {
+    console.log('This bootstrap is attached to the Chrome window you launched manually.');
+  } else {
+    console.log('This bootstrap prefers installed Google Chrome with a persistent local profile.');
+  }
   console.log('Complete the Cloudflare check and LME login manually in that browser.');
   console.log('After the LME account page is loaded, return here and press Enter.');
 

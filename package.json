@@ -9,7 +9,9 @@
     "check": "node --check src/lme-prices.js",
     "bootstrap:lme": "LME_BOOTSTRAP_ONLY=true LME_HEADLESS=false node src/lme-prices.js",
     "setup:self-hosted:lme": "./scripts/bootstrap-self-hosted-lme.sh",
-    "test:lme:fetch-only": "./scripts/test-lme-fetch-only.sh"
+    "test:lme:fetch-only": "./scripts/test-lme-fetch-only.sh",
+    "start:mac-debug-chrome": "./scripts/start-mac-debug-chrome.sh",
+    "bootstrap:existing-chrome": "./scripts/bootstrap-existing-chrome.sh"
   },
   "repository": {
     "type": "git",
