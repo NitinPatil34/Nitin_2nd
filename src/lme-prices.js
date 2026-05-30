@@ -170,6 +170,8 @@ function getConfig() {
     bootstrapOnly,
     sessionOnly,
     storageStatePath,
+    bootstrapProfileDir: expandHomePath(process.env.LME_BOOTSTRAP_PROFILE_DIR || '~/.lme/chrome-bootstrap-profile'),
+    browserChannel: process.env.LME_BROWSER_CHANNEL || (bootstrapOnly ? 'chrome' : ''),
     headless: process.env.LME_HEADLESS !== 'false',
     debugArtifactsDir: process.env.DEBUG_ARTIFACT_DIR || 'debug-artifacts',
   };
@@ -508,12 +510,21 @@ async function saveDebugArtifacts(page, debugArtifactsDir, error) {
   console.error(`Saved debug artifacts to ${debugArtifactsDir}`);
 }
 
-async function createBrowserSession(config) {
-  const browser = await chromium.launch({
+function browserLaunchOptions(config) {
+  const options = {
     headless: config.headless,
     args: ['--disable-blink-features=AutomationControlled'],
-  });
-  const contextOptions = {
+  };
+
+  if (config.browserChannel) {
+    options.channel = config.browserChannel;
+  }
+
+  return options;
+}
+
+function browserContextOptions(config) {
+  return {
     userAgent:
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
     viewport: { width: 1365, height: 768 },
@@ -523,6 +534,27 @@ async function createBrowserSession(config) {
       'Accept-Language': 'en-US,en;q=0.9',
     },
   };
+}
+
+async function createBrowserSession(config) {
+  if (config.bootstrapOnly) {
+    await fs.mkdir(config.bootstrapProfileDir, { recursive: true });
+    const context = await chromium.launchPersistentContext(
+      config.bootstrapProfileDir,
+      {
+        ...browserLaunchOptions(config),
+        ...browserContextOptions(config),
+      },
+    );
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    });
+    console.log(`Using persistent bootstrap browser profile at ${config.bootstrapProfileDir}`);
+    return { browser: context, context, page: context.pages()[0] || (await context.newPage()) };
+  }
+
+  const browser = await chromium.launch(browserLaunchOptions(config));
+  const contextOptions = browserContextOptions(config);
 
   if (await fileExists(config.storageStatePath)) {
     contextOptions.storageState = config.storageStatePath;
@@ -540,6 +572,7 @@ async function createBrowserSession(config) {
 async function bootstrapLmeSession(page, context, config) {
   await page.goto(config.lmeLoginUrl, { waitUntil: 'domcontentloaded' });
   console.log('A browser window has been opened for LME session bootstrap.');
+  console.log('This bootstrap prefers installed Google Chrome with a persistent local profile.');
   console.log('Complete the Cloudflare check and LME login manually in that browser.');
   console.log('After the LME account page is loaded, return here and press Enter.');
 

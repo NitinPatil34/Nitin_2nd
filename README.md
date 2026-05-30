@@ -91,8 +91,8 @@ LME blocks GitHub-hosted runners with a Cloudflare browser challenge. Use a self
    ```bash
    npm run setup:self-hosted:lme
    ```
-   This installs dependencies, installs Playwright Chromium, and starts the LME login bootstrap.
-5. A visible browser opens. Complete the Cloudflare check and LME login manually, then return to the terminal and press Enter.
+   This installs dependencies, installs Playwright Chromium, and starts the LME login bootstrap in installed Google Chrome using a persistent local profile at `~/.lme/chrome-bootstrap-profile`.
+5. A visible Google Chrome window opens. If you are stuck on Cloudflare, close the window and rerun the helper; the same persistent local profile is reused. Complete the Cloudflare check and LME login manually, then return to the terminal and press Enter.
 6. The script saves the approved browser session to:
    ```text
    ~/.lme/lme-storage-state.json
@@ -104,6 +104,17 @@ LME blocks GitHub-hosted runners with a Cloudflare browser challenge. Use a self
 8. In GitHub Actions, run **Record LME cash prices** manually and set `fetch_only=true` for the first runner-based test. That prints the extracted LME rows without updating Google Sheets.
 
 The scheduled workflow also uses `~/.lme/lme-storage-state.json`. If LME expires the session, repeat `npm run setup:self-hosted:lme`.
+
+
+### If the LME page still will not show email/password on Mac
+
+1. Quit all Chrome windows opened by the bootstrap.
+2. Run the setup again so it reuses the persistent profile:
+   ```bash
+   npm run setup:self-hosted:lme
+   ```
+3. If Chrome says it cannot find the `chrome` channel, install Google Chrome normally from <https://www.google.com/chrome/> and rerun the command.
+4. If LME still keeps showing only the Cloudflare page, open `https://www.lme.com/account/login` in your normal Chrome outside Terminal. If normal Chrome also cannot reach the email/password page, the block is IP/account/browser-policy related and you need to try another network/VPN/VPS IP that LME accepts.
 
 ## Local validation
 
