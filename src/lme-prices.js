@@ -133,7 +133,7 @@ function getConfig() {
   const settings = {
     lmeUsername: configValue('LME_USERNAME', details),
     lmePassword: configValue('LME_PASSWORD', details),
-    lmeLoginUrl: configValue('LME_LOGIN_URL', details) || 'https://www.lme.com/',
+    lmeLoginUrl: configValue('LME_LOGIN_URL', details) || 'https://www.lme.com/account/login',
     googleSheetsWebappUrl: configValue('GOOGLE_SHEETS_WEBAPP_URL', details),
     googleSheetsWebappToken: configValue('GOOGLE_SHEETS_WEBAPP_TOKEN', details),
     fetchOnly,

@@ -32,7 +32,7 @@ JSON format:
   "LME_PASSWORD": "your-lme-password",
   "GOOGLE_SHEETS_WEBAPP_URL": "https://script.google.com/macros/s/.../exec",
   "GOOGLE_SHEETS_WEBAPP_TOKEN": "same-token-as-apps-script",
-  "LME_LOGIN_URL": "https://www.lme.com/"
+  "LME_LOGIN_URL": "https://www.lme.com/account/login"
 }
 ```
 
@@ -43,12 +43,12 @@ LME_USERNAME=your-lme-login
 LME_PASSWORD=your-lme-password
 GOOGLE_SHEETS_WEBAPP_URL=https://script.google.com/macros/s/.../exec
 GOOGLE_SHEETS_WEBAPP_TOKEN=same-token-as-apps-script
-LME_LOGIN_URL=https://www.lme.com/
+LME_LOGIN_URL=https://www.lme.com/account/login
 ```
 
 If you named the token `WEBHOOK_TOKEN` inside `DETAILS`, that also works.
 
-`LME_LOGIN_URL` is optional. Use it only if your LME account has a specific login page URL.
+`LME_LOGIN_URL` is optional. The default is https://www.lme.com/account/login; override it only if your LME account uses a different login page.
 
 Alternatively, create separate repository secrets under **Settings -> Secrets and variables -> Actions -> New repository secret**:
 
@@ -56,7 +56,7 @@ Alternatively, create separate repository secrets under **Settings -> Secrets an
 | --- | --- | --- |
 | `LME_USERNAME` | Yes | LME login username or email. |
 | `LME_PASSWORD` | Yes | LME login password. |
-| `LME_LOGIN_URL` | Optional | Exact LME login URL if the default homepage account link is not enough. |
+| `LME_LOGIN_URL` | Optional | Exact LME login URL; defaults to https://www.lme.com/account/login. |
 | `GOOGLE_SHEETS_WEBAPP_URL` | Yes | Deployed Google Apps Script web app URL. A secret named `GOOGLE_SHEETS` is also accepted for this URL. |
 | `GOOGLE_SHEETS_WEBAPP_TOKEN` | Yes | Shared token used to protect the web app endpoint. |
 
@@ -113,7 +113,7 @@ npm run fetch:lme
 If the LME login page is different for your account, add:
 
 ```bash
-LME_LOGIN_URL='https://exact-login-url'
+LME_LOGIN_URL='https://www.lme.com/account/login'
 ```
 
 ## Recorded columns
