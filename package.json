@@ -7,7 +7,9 @@
     "test": "npm run check",
     "fetch:lme": "node src/lme-prices.js",
     "check": "node --check src/lme-prices.js",
-    "bootstrap:lme": "LME_BOOTSTRAP_ONLY=true LME_HEADLESS=false node src/lme-prices.js"
+    "bootstrap:lme": "LME_BOOTSTRAP_ONLY=true LME_HEADLESS=false node src/lme-prices.js",
+    "setup:self-hosted:lme": "./scripts/bootstrap-self-hosted-lme.sh",
+    "test:lme:fetch-only": "./scripts/test-lme-fetch-only.sh"
   },
   "repository": {
     "type": "git",

@@ -87,28 +87,23 @@ LME blocks GitHub-hosted runners with a Cloudflare browser challenge. Use a self
    lme
    ```
 3. Install Node.js 22+ on that machine.
-4. From the repository working copy on the runner machine, install dependencies and Playwright's browser:
+4. From the repository working copy on the runner machine, run the helper as the same OS user that runs the GitHub runner service:
    ```bash
-   npm ci
-   npx playwright install chromium
+   npm run setup:self-hosted:lme
    ```
-5. Bootstrap the LME browser session as the same OS user that runs the GitHub runner service:
-   ```bash
-   LME_STORAGE_STATE=~/.lme/lme-storage-state.json npm run bootstrap:lme
-   ```
-6. A visible browser opens. Complete the Cloudflare check and LME login manually, then return to the terminal and press Enter.
-7. The script saves the approved browser session to:
+   This installs dependencies, installs Playwright Chromium, and starts the LME login bootstrap.
+5. A visible browser opens. Complete the Cloudflare check and LME login manually, then return to the terminal and press Enter.
+6. The script saves the approved browser session to:
    ```text
    ~/.lme/lme-storage-state.json
    ```
-8. Run an LME-only test from the same machine:
+7. Run an LME-only test from the same machine:
    ```bash
-   LME_FETCH_ONLY=true \
-   LME_STORAGE_STATE=~/.lme/lme-storage-state.json \
-   npm run fetch:lme
+   npm run test:lme:fetch-only
    ```
+8. In GitHub Actions, run **Record LME cash prices** manually and set `fetch_only=true` for the first runner-based test. That prints the extracted LME rows without updating Google Sheets.
 
-The scheduled workflow also uses `~/.lme/lme-storage-state.json`. If LME expires the session, repeat the bootstrap command.
+The scheduled workflow also uses `~/.lme/lme-storage-state.json`. If LME expires the session, repeat `npm run setup:self-hosted:lme`.
 
 ## Local validation
 
@@ -141,6 +136,12 @@ LME_FETCH_ONLY=true \
 LME_USERNAME='your-login' \
 LME_PASSWORD='your-password' \
 npm run fetch:lme
+```
+
+After a self-hosted bootstrap, test with the saved session only:
+
+```bash
+npm run test:lme:fetch-only
 ```
 
 If the LME login page is different for your account, add:

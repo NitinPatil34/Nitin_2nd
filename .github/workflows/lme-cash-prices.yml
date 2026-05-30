@@ -4,6 +4,12 @@ on:
   schedule:
     - cron: '30 2 * * *'
   workflow_dispatch:
+    inputs:
+      fetch_only:
+        description: 'Only fetch and print LME prices; do not update Google Sheets'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   record-prices:
@@ -23,6 +29,7 @@ jobs:
       WEBHOOK_TOKEN: ${{ secrets.WEBHOOK_TOKEN }}
       DEBUG_ARTIFACT_DIR: debug-artifacts
       LME_STORAGE_STATE: ~/.lme/lme-storage-state.json
+      LME_FETCH_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.fetch_only }}
 
     steps:
       - name: Check out repository

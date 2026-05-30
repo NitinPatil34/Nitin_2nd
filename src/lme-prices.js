@@ -1,4 +1,5 @@
 import { chromium } from 'playwright';
+import { existsSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createInterface } from 'node:readline/promises';
@@ -147,7 +148,14 @@ function getConfig() {
   const details = parseDetailsSecret(process.env.DETAILS);
   const fetchOnly = isEnabled(process.env.LME_FETCH_ONLY);
   const bootstrapOnly = isEnabled(process.env.LME_BOOTSTRAP_ONLY);
-  const requiredSettings = bootstrapOnly
+  const storageStatePath = expandHomePath(process.env.LME_STORAGE_STATE || '~/.lme/lme-storage-state.json');
+  const sessionOnly =
+    isEnabled(process.env.LME_SESSION_ONLY) ||
+    (fetchOnly &&
+      existsSync(storageStatePath) &&
+      !configValue('LME_USERNAME', details) &&
+      !configValue('LME_PASSWORD', details));
+  const requiredSettings = bootstrapOnly || sessionOnly
     ? []
     : fetchOnly
       ? LME_REQUIRED_SETTINGS
@@ -160,7 +168,8 @@ function getConfig() {
     googleSheetsWebappToken: configValue('GOOGLE_SHEETS_WEBAPP_TOKEN', details),
     fetchOnly,
     bootstrapOnly,
-    storageStatePath: expandHomePath(process.env.LME_STORAGE_STATE || '~/.lme/lme-storage-state.json'),
+    sessionOnly,
+    storageStatePath,
     headless: process.env.LME_HEADLESS !== 'false',
     debugArtifactsDir: process.env.DEBUG_ARTIFACT_DIR || 'debug-artifacts',
   };
@@ -547,8 +556,13 @@ async function getLmeRows(page, context, config) {
       return await fetchMetalRows(page);
     } catch (error) {
       console.log(`Stored LME browser session did not produce prices: ${error.message}`);
+      if (config.sessionOnly) {
+        throw new Error('Stored LME session failed. Run npm run bootstrap:lme again on the self-hosted runner.');
+      }
       console.log('Falling back to username/password login.');
     }
+  } else if (config.sessionOnly) {
+    throw new Error(`LME session file not found at ${config.storageStatePath}. Run npm run bootstrap:lme first.`);
   }
 
   await loginToLme(page, config);
