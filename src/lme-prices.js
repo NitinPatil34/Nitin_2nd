@@ -93,7 +93,8 @@ function parseDetailsSecret(rawDetails) {
   }
 
   for (const line of rawDetails.split(/\r?\n/)) {
-    const match = line.match(/^\s*([^:=#]+?)\s*[:=]\s*(.+?)\s*$/);
+    const match = line.match(/^\s*([^:=#]+?)\s*[:=]\s*(.+?)\s*$/) ||
+      line.match(/^\s*([^#]+?)\s+-\s+(.+?)\s*$/);
     if (match) {
       addEntry(match[1], match[2]);
     }
@@ -103,12 +104,15 @@ function parseDetailsSecret(rawDetails) {
 }
 
 function configValue(settingName, details) {
-  const directValue = cleanValue(process.env[settingName]);
-  if (directValue) {
-    return directValue;
+  const aliases = SETTING_ALIASES[settingName] || [settingName];
+  for (const alias of [settingName, ...aliases]) {
+    const directValue = cleanValue(process.env[alias]);
+    if (directValue) {
+      return directValue;
+    }
   }
 
-  for (const alias of SETTING_ALIASES[settingName] || [settingName]) {
+  for (const alias of aliases) {
     const value = details[alias] || details[normalizeKey(alias)];
     if (value) {
       return value;
