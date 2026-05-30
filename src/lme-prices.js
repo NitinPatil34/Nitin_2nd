@@ -168,6 +168,26 @@ async function firstVisible(page, selectors, timeoutMs = 2_000) {
   return null;
 }
 
+async function waitForCloudflareChallenge(page) {
+  for (let attempt = 0; attempt < 90; attempt += 1) {
+    const title = await page.title().catch(() => '');
+    const bodyText = await page.locator('body').innerText({ timeout: 1_000 }).catch(() => '');
+    const challengeVisible =
+      /just a moment/i.test(title) ||
+      /checking your browser|verify you are human|enable javascript and cookies/i.test(bodyText);
+
+    if (!challengeVisible) {
+      return;
+    }
+
+    await page.waitForTimeout(1_000);
+  }
+
+  throw new Error(
+    'LME is still showing a Cloudflare browser challenge after waiting. The runner may need an allowlist, exact LME login URL, or a non-GitHub-hosted execution environment.',
+  );
+}
+
 async function acceptCookies(page) {
   const cookieButton = await firstVisible(
     page,
@@ -189,6 +209,7 @@ async function acceptCookies(page) {
 
 async function openLogin(page, loginUrl) {
   await page.goto(loginUrl, { waitUntil: 'domcontentloaded' });
+  await waitForCloudflareChallenge(page);
   await acceptCookies(page);
 
   const hasPassword = await firstVisible(page, ['input[type="password"]'], 1_000);
@@ -203,6 +224,10 @@ async function openLogin(page, loginUrl) {
       'a:has-text("Log in")',
       'a:has-text("Sign in")',
       'a:has-text("Account")',
+      'a[href*="login" i]',
+      'a[href*="account" i]',
+      'a[href*="signin" i]',
+      '[aria-label*="account" i]',
       'button:has-text("Login")',
       'button:has-text("Log in")',
       'button:has-text("Sign in")',
@@ -219,6 +244,7 @@ async function openLogin(page, loginUrl) {
 
   await loginLink.click();
   await page.waitForLoadState('domcontentloaded').catch(() => undefined);
+  await waitForCloudflareChallenge(page);
   await acceptCookies(page);
 }
 
@@ -389,6 +415,7 @@ async function fetchMetalRows(page) {
 
   for (const metal of METALS) {
     await page.goto(metal.url, { waitUntil: 'domcontentloaded' });
+    await waitForCloudflareChallenge(page);
     await acceptCookies(page);
     await page.waitForLoadState('networkidle').catch(() => undefined);
 
@@ -445,8 +472,24 @@ async function saveDebugArtifacts(page, debugArtifactsDir, error) {
 
 async function main() {
   const config = getConfig();
-  const browser = await chromium.launch({ headless: config.headless });
-  const page = await browser.newPage();
+  const browser = await chromium.launch({
+    headless: config.headless,
+    args: ['--disable-blink-features=AutomationControlled'],
+  });
+  const context = await browser.newContext({
+    userAgent:
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+    viewport: { width: 1365, height: 768 },
+    locale: 'en-US',
+    timezoneId: 'UTC',
+    extraHTTPHeaders: {
+      'Accept-Language': 'en-US,en;q=0.9',
+    },
+  });
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+  });
+  const page = await context.newPage();
 
   try {
     await loginToLme(page, config);
