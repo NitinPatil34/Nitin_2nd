@@ -17,12 +17,8 @@ const METALS = [
   },
 ];
 
-const REQUIRED_SETTINGS = [
-  'LME_USERNAME',
-  'LME_PASSWORD',
-  'GOOGLE_SHEETS_WEBAPP_URL',
-  'GOOGLE_SHEETS_WEBAPP_TOKEN',
-];
+const LME_REQUIRED_SETTINGS = ['LME_USERNAME', 'LME_PASSWORD'];
+const GOOGLE_SHEETS_REQUIRED_SETTINGS = ['GOOGLE_SHEETS_WEBAPP_URL', 'GOOGLE_SHEETS_WEBAPP_TOKEN'];
 
 const SETTING_ALIASES = {
   LME_USERNAME: ['LME_USERNAME', 'LME_USER', 'LME_EMAIL', 'LME_LOGIN', 'USERNAME', 'EMAIL'],
@@ -32,6 +28,8 @@ const SETTING_ALIASES = {
     'GOOGLE_SHEETS_WEBAPP_URL',
     'GOOGLE_SHEET_WEBAPP_URL',
     'GOOGLE_WEBAPP_URL',
+    'GOOGLE_SHEETS',
+    'GOOGLE_SHEET',
     'WEBAPP_URL',
     'SHEETS_WEBAPP_URL',
   ],
@@ -122,19 +120,28 @@ function configValue(settingName, details) {
   return '';
 }
 
+function isEnabled(value) {
+  return ['1', 'true', 'yes', 'on'].includes(String(value || '').trim().toLowerCase());
+}
+
 function getConfig() {
   const details = parseDetailsSecret(process.env.DETAILS);
+  const fetchOnly = isEnabled(process.env.LME_FETCH_ONLY);
+  const requiredSettings = fetchOnly
+    ? LME_REQUIRED_SETTINGS
+    : [...LME_REQUIRED_SETTINGS, ...GOOGLE_SHEETS_REQUIRED_SETTINGS];
   const settings = {
     lmeUsername: configValue('LME_USERNAME', details),
     lmePassword: configValue('LME_PASSWORD', details),
     lmeLoginUrl: configValue('LME_LOGIN_URL', details) || 'https://www.lme.com/',
     googleSheetsWebappUrl: configValue('GOOGLE_SHEETS_WEBAPP_URL', details),
     googleSheetsWebappToken: configValue('GOOGLE_SHEETS_WEBAPP_TOKEN', details),
+    fetchOnly,
     headless: process.env.LME_HEADLESS !== 'false',
     debugArtifactsDir: process.env.DEBUG_ARTIFACT_DIR || 'debug-artifacts',
   };
 
-  const missingSettings = REQUIRED_SETTINGS.filter((name) => !configValue(name, details));
+  const missingSettings = requiredSettings.filter((name) => !configValue(name, details));
   if (missingSettings.length > 0) {
     throw new Error(
       `Missing required configuration: ${missingSettings.join(
@@ -444,6 +451,13 @@ async function main() {
   try {
     await loginToLme(page, config);
     const rows = await fetchMetalRows(page);
+    console.log(`LME_FETCH_RESULT ${JSON.stringify(rows)}`);
+
+    if (config.fetchOnly) {
+      console.log('LME fetch-only mode enabled; skipping Google Sheets post.');
+      return;
+    }
+
     await postRowsToSheet(config, rows);
   } catch (error) {
     await saveDebugArtifacts(page, config.debugArtifactsDir, error);
