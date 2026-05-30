@@ -6,7 +6,8 @@
   "scripts": {
     "test": "npm run check",
     "fetch:lme": "node src/lme-prices.js",
-    "check": "node --check src/lme-prices.js"
+    "check": "node --check src/lme-prices.js",
+    "bootstrap:lme": "LME_BOOTSTRAP_ONLY=true LME_HEADLESS=false node src/lme-prices.js"
   },
   "repository": {
     "type": "git",

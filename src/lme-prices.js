@@ -1,6 +1,8 @@
 import { chromium } from 'playwright';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { createInterface } from 'node:readline/promises';
+import { stdin as input, stdout as output } from 'node:process';
 
 const METALS = [
   {
@@ -124,12 +126,32 @@ function isEnabled(value) {
   return ['1', 'true', 'yes', 'on'].includes(String(value || '').trim().toLowerCase());
 }
 
+function expandHomePath(filePath) {
+  if (!filePath?.startsWith('~/')) {
+    return filePath;
+  }
+
+  return path.join(process.env.HOME || process.cwd(), filePath.slice(2));
+}
+
+async function fileExists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function getConfig() {
   const details = parseDetailsSecret(process.env.DETAILS);
   const fetchOnly = isEnabled(process.env.LME_FETCH_ONLY);
-  const requiredSettings = fetchOnly
-    ? LME_REQUIRED_SETTINGS
-    : [...LME_REQUIRED_SETTINGS, ...GOOGLE_SHEETS_REQUIRED_SETTINGS];
+  const bootstrapOnly = isEnabled(process.env.LME_BOOTSTRAP_ONLY);
+  const requiredSettings = bootstrapOnly
+    ? []
+    : fetchOnly
+      ? LME_REQUIRED_SETTINGS
+      : [...LME_REQUIRED_SETTINGS, ...GOOGLE_SHEETS_REQUIRED_SETTINGS];
   const settings = {
     lmeUsername: configValue('LME_USERNAME', details),
     lmePassword: configValue('LME_PASSWORD', details),
@@ -137,6 +159,8 @@ function getConfig() {
     googleSheetsWebappUrl: configValue('GOOGLE_SHEETS_WEBAPP_URL', details),
     googleSheetsWebappToken: configValue('GOOGLE_SHEETS_WEBAPP_TOKEN', details),
     fetchOnly,
+    bootstrapOnly,
+    storageStatePath: expandHomePath(process.env.LME_STORAGE_STATE || '~/.lme/lme-storage-state.json'),
     headless: process.env.LME_HEADLESS !== 'false',
     debugArtifactsDir: process.env.DEBUG_ARTIFACT_DIR || 'debug-artifacts',
   };
@@ -153,6 +177,11 @@ function getConfig() {
   return settings;
 }
 
+async function saveStorageState(context, config) {
+  await fs.mkdir(path.dirname(config.storageStatePath), { recursive: true });
+  await context.storageState({ path: config.storageStatePath });
+  console.log(`Saved LME browser session to ${config.storageStatePath}`);
+}
 
 async function firstVisible(page, selectors, timeoutMs = 2_000) {
   for (const selector of selectors) {
@@ -470,13 +499,12 @@ async function saveDebugArtifacts(page, debugArtifactsDir, error) {
   console.error(`Saved debug artifacts to ${debugArtifactsDir}`);
 }
 
-async function main() {
-  const config = getConfig();
+async function createBrowserSession(config) {
   const browser = await chromium.launch({
     headless: config.headless,
     args: ['--disable-blink-features=AutomationControlled'],
   });
-  const context = await browser.newContext({
+  const contextOptions = {
     userAgent:
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
     viewport: { width: 1365, height: 768 },
@@ -485,15 +513,60 @@ async function main() {
     extraHTTPHeaders: {
       'Accept-Language': 'en-US,en;q=0.9',
     },
-  });
+  };
+
+  if (await fileExists(config.storageStatePath)) {
+    contextOptions.storageState = config.storageStatePath;
+    console.log(`Loaded LME browser session from ${config.storageStatePath}`);
+  }
+
+  const context = await browser.newContext(contextOptions);
   await context.addInitScript(() => {
     Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
   });
-  const page = await context.newPage();
+
+  return { browser, context, page: await context.newPage() };
+}
+
+async function bootstrapLmeSession(page, context, config) {
+  await page.goto(config.lmeLoginUrl, { waitUntil: 'domcontentloaded' });
+  console.log('A browser window has been opened for LME session bootstrap.');
+  console.log('Complete the Cloudflare check and LME login manually in that browser.');
+  console.log('After the LME account page is loaded, return here and press Enter.');
+
+  const readline = createInterface({ input, output });
+  await readline.question('Press Enter after the LME login is complete...');
+  readline.close();
+
+  await saveStorageState(context, config);
+}
+
+async function getLmeRows(page, context, config) {
+  if (await fileExists(config.storageStatePath)) {
+    try {
+      return await fetchMetalRows(page);
+    } catch (error) {
+      console.log(`Stored LME browser session did not produce prices: ${error.message}`);
+      console.log('Falling back to username/password login.');
+    }
+  }
+
+  await loginToLme(page, config);
+  await saveStorageState(context, config);
+  return fetchMetalRows(page);
+}
+
+async function main() {
+  const config = getConfig();
+  const { browser, context, page } = await createBrowserSession(config);
 
   try {
-    await loginToLme(page, config);
-    const rows = await fetchMetalRows(page);
+    if (config.bootstrapOnly) {
+      await bootstrapLmeSession(page, context, config);
+      return;
+    }
+
+    const rows = await getLmeRows(page, context, config);
     console.log(`LME_FETCH_RESULT ${JSON.stringify(rows)}`);
 
     if (config.fetchOnly) {

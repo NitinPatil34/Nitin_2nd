@@ -16,7 +16,7 @@ The GitHub Actions workflow runs every day at **02:30 UTC**:
 cron: '30 2 * * *'
 ```
 
-You can also run it manually from the **Actions** tab with `workflow_dispatch`.
+You can also run it manually from the **Actions** tab with `workflow_dispatch`. The workflow is configured for a self-hosted GitHub Actions runner labeled `lme`, because LME/Cloudflare blocks GitHub-hosted runners before the login form loads.
 
 ## GitHub Secrets
 
@@ -76,6 +76,39 @@ Alternatively, create separate repository secrets under **Settings -> Secrets an
 8. Put the same random token into either `GOOGLE_SHEETS_WEBAPP_TOKEN` or the matching field inside the combined `DETAILS` secret.
 
 The Apps Script creates or updates a sheet tab named **Non Ferrous** and appends one row per metal on every run.
+
+## Self-hosted runner setup for LME
+
+LME blocks GitHub-hosted runners with a Cloudflare browser challenge. Use a self-hosted runner on a machine or VPS whose browser/IP can open `https://www.lme.com/account/login` normally.
+
+1. In GitHub, go to **Settings -> Actions -> Runners -> New self-hosted runner**.
+2. Install the runner on the chosen machine and add the custom label:
+   ```text
+   lme
+   ```
+3. Install Node.js 22+ on that machine.
+4. From the repository working copy on the runner machine, install dependencies and Playwright's browser:
+   ```bash
+   npm ci
+   npx playwright install chromium
+   ```
+5. Bootstrap the LME browser session as the same OS user that runs the GitHub runner service:
+   ```bash
+   LME_STORAGE_STATE=~/.lme/lme-storage-state.json npm run bootstrap:lme
+   ```
+6. A visible browser opens. Complete the Cloudflare check and LME login manually, then return to the terminal and press Enter.
+7. The script saves the approved browser session to:
+   ```text
+   ~/.lme/lme-storage-state.json
+   ```
+8. Run an LME-only test from the same machine:
+   ```bash
+   LME_FETCH_ONLY=true \
+   LME_STORAGE_STATE=~/.lme/lme-storage-state.json \
+   npm run fetch:lme
+   ```
+
+The scheduled workflow also uses `~/.lme/lme-storage-state.json`. If LME expires the session, repeat the bootstrap command.
 
 ## Local validation
 
