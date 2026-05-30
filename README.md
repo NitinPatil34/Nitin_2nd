@@ -57,7 +57,7 @@ Alternatively, create separate repository secrets under **Settings -> Secrets an
 | `LME_USERNAME` | Yes | LME login username or email. |
 | `LME_PASSWORD` | Yes | LME login password. |
 | `LME_LOGIN_URL` | Optional | Exact LME login URL if the default homepage account link is not enough. |
-| `GOOGLE_SHEETS_WEBAPP_URL` | Yes | Deployed Google Apps Script web app URL. |
+| `GOOGLE_SHEETS_WEBAPP_URL` | Yes | Deployed Google Apps Script web app URL. A secret named `GOOGLE_SHEETS` is also accepted for this URL. |
 | `GOOGLE_SHEETS_WEBAPP_TOKEN` | Yes | Shared token used to protect the web app endpoint. |
 
 ## Google Sheet web app setup
@@ -91,13 +91,22 @@ Check script syntax:
 npm run check
 ```
 
-Run the fetcher locally:
+Run the full fetcher locally:
 
 ```bash
 LME_USERNAME='your-login' \
 LME_PASSWORD='your-password' \
 GOOGLE_SHEETS_WEBAPP_URL='https://script.google.com/macros/s/...' \
 GOOGLE_SHEETS_WEBAPP_TOKEN='same-token-as-apps-script' \
+npm run fetch:lme
+```
+
+Run only the LME login/data extraction step without posting to Google Sheets:
+
+```bash
+LME_FETCH_ONLY=true \
+LME_USERNAME='your-login' \
+LME_PASSWORD='your-password' \
 npm run fetch:lme
 ```
 
