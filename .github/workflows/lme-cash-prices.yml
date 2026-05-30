@@ -11,6 +11,7 @@ jobs:
     timeout-minutes: 20
 
     env:
+      DETAILS: ${{ secrets.DETAILS }}
       LME_USERNAME: ${{ secrets.LME_USERNAME }}
       LME_PASSWORD: ${{ secrets.LME_PASSWORD }}
       LME_LOGIN_URL: ${{ secrets.LME_LOGIN_URL }}

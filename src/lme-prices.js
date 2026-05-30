@@ -17,36 +17,126 @@ const METALS = [
   },
 ];
 
-const REQUIRED_ENV = [
+const REQUIRED_SETTINGS = [
   'LME_USERNAME',
   'LME_PASSWORD',
   'GOOGLE_SHEETS_WEBAPP_URL',
   'GOOGLE_SHEETS_WEBAPP_TOKEN',
 ];
 
-function requireEnv(name) {
-  const value = process.env[name];
-  if (!value) {
-    throw new Error(`Missing required environment variable: ${name}`);
+const SETTING_ALIASES = {
+  LME_USERNAME: ['LME_USERNAME', 'LME_USER', 'LME_EMAIL', 'LME_LOGIN', 'USERNAME', 'EMAIL'],
+  LME_PASSWORD: ['LME_PASSWORD', 'LME_PASS', 'PASSWORD'],
+  LME_LOGIN_URL: ['LME_LOGIN_URL', 'LOGIN_URL'],
+  GOOGLE_SHEETS_WEBAPP_URL: [
+    'GOOGLE_SHEETS_WEBAPP_URL',
+    'GOOGLE_SHEET_WEBAPP_URL',
+    'GOOGLE_WEBAPP_URL',
+    'WEBAPP_URL',
+    'SHEETS_WEBAPP_URL',
+  ],
+  GOOGLE_SHEETS_WEBAPP_TOKEN: [
+    'GOOGLE_SHEETS_WEBAPP_TOKEN',
+    'GOOGLE_SHEET_WEBAPP_TOKEN',
+    'GOOGLE_WEBAPP_TOKEN',
+    'WEBAPP_TOKEN',
+    'TOKEN',
+  ],
+};
+
+function normalizeKey(key) {
+  return key
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+function cleanValue(value) {
+  return String(value ?? '')
+    .trim()
+    .replace(/^[\'"]|[\'"]$/g, '');
+}
+
+function parseDetailsSecret(rawDetails) {
+  const details = {};
+  const addEntry = (key, value) => {
+    const cleanedValue = cleanValue(value);
+    if (!key || !cleanedValue) {
+      return;
+    }
+
+    details[key] = cleanedValue;
+    details[normalizeKey(key)] = cleanedValue;
+  };
+
+  if (!rawDetails?.trim()) {
+    return details;
   }
-  return value;
+
+  try {
+    const parsed = JSON.parse(rawDetails);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      for (const [key, value] of Object.entries(parsed)) {
+        addEntry(key, value);
+      }
+
+      return details;
+    }
+  } catch {
+    // If DETAILS is not JSON, parse it as KEY=VALUE or KEY: VALUE lines.
+  }
+
+  for (const line of rawDetails.split(/\r?\n/)) {
+    const match = line.match(/^\s*([^:=#]+?)\s*[:=]\s*(.+?)\s*$/);
+    if (match) {
+      addEntry(match[1], match[2]);
+    }
+  }
+
+  return details;
+}
+
+function configValue(settingName, details) {
+  const directValue = cleanValue(process.env[settingName]);
+  if (directValue) {
+    return directValue;
+  }
+
+  for (const alias of SETTING_ALIASES[settingName] || [settingName]) {
+    const value = details[alias] || details[normalizeKey(alias)];
+    if (value) {
+      return value;
+    }
+  }
+
+  return '';
 }
 
 function getConfig() {
-  for (const name of REQUIRED_ENV) {
-    requireEnv(name);
-  }
-
-  return {
-    lmeUsername: process.env.LME_USERNAME,
-    lmePassword: process.env.LME_PASSWORD,
-    lmeLoginUrl: process.env.LME_LOGIN_URL || 'https://www.lme.com/',
-    googleSheetsWebappUrl: process.env.GOOGLE_SHEETS_WEBAPP_URL,
-    googleSheetsWebappToken: process.env.GOOGLE_SHEETS_WEBAPP_TOKEN,
+  const details = parseDetailsSecret(process.env.DETAILS);
+  const settings = {
+    lmeUsername: configValue('LME_USERNAME', details),
+    lmePassword: configValue('LME_PASSWORD', details),
+    lmeLoginUrl: configValue('LME_LOGIN_URL', details) || 'https://www.lme.com/',
+    googleSheetsWebappUrl: configValue('GOOGLE_SHEETS_WEBAPP_URL', details),
+    googleSheetsWebappToken: configValue('GOOGLE_SHEETS_WEBAPP_TOKEN', details),
     headless: process.env.LME_HEADLESS !== 'false',
     debugArtifactsDir: process.env.DEBUG_ARTIFACT_DIR || 'debug-artifacts',
   };
+
+  const missingSettings = REQUIRED_SETTINGS.filter((name) => !configValue(name, details));
+  if (missingSettings.length > 0) {
+    throw new Error(
+      `Missing required configuration: ${missingSettings.join(
+        ', ',
+      )}. Provide these as individual GitHub Secrets or inside the DETAILS secret.`,
+    );
+  }
+
+  return settings;
 }
+
 
 async function firstVisible(page, selectors, timeoutMs = 2_000) {
   for (const selector of selectors) {

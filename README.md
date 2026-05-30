@@ -20,9 +20,35 @@ You can also run it manually from the **Actions** tab with `workflow_dispatch`.
 
 ## GitHub Secrets
 
-Yes, the LME credentials should be stored in GitHub repository secrets, not in source code.
+Yes, the LME credentials and Google Sheet web app values should be stored in GitHub repository secrets, not in source code.
 
-Create these repository secrets under **Settings -> Secrets and variables -> Actions -> New repository secret**:
+The workflow supports either one combined secret named `DETAILS` or separate secrets. If you already added everything under `DETAILS`, make sure the value uses one of these formats.
+
+JSON format:
+
+```json
+{
+  "LME_USERNAME": "your-lme-login",
+  "LME_PASSWORD": "your-lme-password",
+  "GOOGLE_SHEETS_WEBAPP_URL": "https://script.google.com/macros/s/.../exec",
+  "GOOGLE_SHEETS_WEBAPP_TOKEN": "same-token-as-apps-script",
+  "LME_LOGIN_URL": "https://www.lme.com/"
+}
+```
+
+Or `KEY=VALUE` lines:
+
+```text
+LME_USERNAME=your-lme-login
+LME_PASSWORD=your-lme-password
+GOOGLE_SHEETS_WEBAPP_URL=https://script.google.com/macros/s/.../exec
+GOOGLE_SHEETS_WEBAPP_TOKEN=same-token-as-apps-script
+LME_LOGIN_URL=https://www.lme.com/
+```
+
+`LME_LOGIN_URL` is optional. Use it only if your LME account has a specific login page URL.
+
+Alternatively, create separate repository secrets under **Settings -> Secrets and variables -> Actions -> New repository secret**:
 
 | Secret | Required | Description |
 | --- | --- | --- |
@@ -44,8 +70,8 @@ Create these repository secrets under **Settings -> Secrets and variables -> Act
 6. Set:
    - Execute as: **Me**
    - Who has access: **Anyone with the link**
-7. Copy the deployment URL into the GitHub secret `GOOGLE_SHEETS_WEBAPP_URL`.
-8. Put the same random token into the GitHub secret `GOOGLE_SHEETS_WEBAPP_TOKEN`.
+7. Copy the deployment URL into either `GOOGLE_SHEETS_WEBAPP_URL` or the matching field inside the combined `DETAILS` secret.
+8. Put the same random token into either `GOOGLE_SHEETS_WEBAPP_TOKEN` or the matching field inside the combined `DETAILS` secret.
 
 The Apps Script creates or updates a sheet tab named **Non Ferrous** and appends one row per metal on every run.
 
